@@ -1,0 +1,111 @@
+#!/usr/bin/perl
+BEGIN{
+    for(@INC){
+        shift @INC if(/(^\/WORK)|(^\/PUBLIC)/);
+    }
+}
+use Time::Local;
+
+my %job;
+my $jobid;
+
+my ($run,$total) = (0,0);
+
+my $user = shift || $ENV{'USER'};
+open FL,"qstat -u $user|";
+while(<FL>){
+    chomp;
+    if(/^\s*(\d+)/){
+        s/^\s+//;
+        my @tem = split /\s+/;
+        $tem[7] =~ s/.*\@//;
+        $tem[7] =~ s/.local//;
+        $job{$tem[0]} = $tem[7];
+		$run ++ if($tem[4] eq 'r');
+		$total ++;
+    }
+}
+close FL;
+
+
+open OUT,"|less -S";
+printf OUT "%-9s%-10s%-7s%-7s%-10s%-7s%-8sCMD [$run/$total]\n","JOBID","CPU","Mnow","Mmax","node","VF","Hours";
+print OUT '-' x 64 ,"\n";
+for my $jobid(sort {$a<=>$b} keys %job){
+    my ($jobid,$cpu,$vf,$vmem,$mmem,$path,$vcpu,$hours) = getstat($jobid);
+    my $str;
+    if($mmem >= $vf){
+        $vf = "[$vf]";
+    }
+    printf OUT "%-9s%-10s%-7s%-7s%-10s%-7s%-8s$path\n",$jobid,"$cpu/$vcpu",$vmem,$mmem,$job{$jobid},$vf,$hours;
+}
+
+sub getstat{
+    my ($jobid) = @_;
+    open FL,"qstat -j $jobid 2> /dev/null |";
+    my ($cwd,$cpu,$vf,$file,$vmem,$mmem,$path,$submit_time,$tcpu,$vcpu,$cfile);
+    $cpu = 0;
+    while(<FL>){
+        if(/^sge_o_workdir:\s+(.*)/){
+            $cwd = $1;
+        }elsif(/virtual_free=([^,]+)/){
+            $vf = $1;
+        }
+        if(/num_proc=(\d+)/){
+            $cpu = $1;
+        }elsif(/^script_file:\s+(.*)/){
+            $file = $1;
+        }elsif(/^usage    1:\s+(.*)/){
+            ($tcpu,$vmem,$mmem) = $1 =~ /cpu=(.*?),.*vmem=(.*?), maxvmem=(.*)/;
+            $vcpu = sprintf "%0.1f",&toSec($tcpu)/timespan($submit_time);
+        }elsif(/^job_args:\s+(.*)/){
+            $cfile = $1;
+            $cfile =~ s/\s+/ /g;
+        }elsif(/^submission_time:\s+(.*)/){
+            $submit_time = $1;
+        }
+    }
+    if($file eq '/bin/sh' or $file =~ /sge6-test.sh$/){
+        $cfile =~ s/^\-c[,\s]+//;
+        $path = "[$cwd] $cfile";
+    }elsif($file =~ /^\//){
+		$path = $file;
+    }else{
+        $path = "$cwd/$file $cfile";
+    }
+    return ($jobid,$cpu,M2G($vf),M2G($vmem),M2G($mmem),$path,$vcpu,(sprintf "%0.1fh",timespan($submit_time)/3600 ));
+}
+close OUT;
+
+sub M2G{
+    my %unit = qw/K 1e-6 M 1e-3 G 1 T 1e3/;
+    my ($str) = @_;
+    if($str =~ /(.*)(K|M|G|T)/i){
+        return sprintf "%0.1f",$1 * $unit{uc($2)};
+    }else{
+        return $str;
+    }
+}
+
+sub timespan{
+    my $start = shift;
+    my @months;
+    @months{qw(Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec)} = (0..11);
+    my ($mon,$day,$hour,$min,$sec,$year) = $start =~ /\w+\s+(\w+)\s+(\d+)\s+(\d+):(\d+):(\d+)\s+(\d+)/;
+    $mon = $months{$mon};
+    $year -= 1900;
+    my $epoch = timelocal($sec,$min,$hour,$day,$mon,$year);
+    return time - $epoch;
+}
+
+sub toSec{
+    my $tcpu = shift;
+    my @unit = (1,60,60*60,60*60*24);
+    my @time = split /:/,$tcpu;
+    @time = reverse @time;
+    my $sum;
+    for(0..$#time){
+        $sum += $time[$_] * $unit[$_];
+    }
+    return $sum;
+}
