@@ -1,0 +1,5 @@
+LANG="en_US.UTF-8"
+SUPPORTED="zh_CN.GB18030:zh_CN:zh:en_US.UTF-8:en_US:en"
+SYSFONT="latarcyrheb-sun16"
+LC_ALL="en_US.UTF-8"
+export LC_ALL
